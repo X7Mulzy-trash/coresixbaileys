@@ -52,7 +52,7 @@ const getClientPayload = config => {
 	payload.webInfo = getWebInfo(config)
 	return payload
 }
-const generateLoginNode = (userJid, config) => {
+const generateLoginNode = (userJid, config, creds) => {
 	const { user, device } = (0, WABinary_1.jidDecode)(userJid)
 	// masqueradeAsPrimary: connect as device 0 so the WA server (and interop bridges)
 	// route primary-device traffic — including interop messages — to this session.
@@ -64,8 +64,16 @@ const generateLoginNode = (userJid, config) => {
 		pull: !config.masqueradeAsPrimary,
 		username: +user,
 		device: effectiveDevice,
-		// TODO: investigate (hard set as false atm)
 		lidDbMigrated: false
+	}
+	// InteropData is required for Meta/FB-linked accounts (AccountType = HOSTED).
+	// Populated from creds when present so the server routes interop traffic correctly.
+	if (creds?.interopData?.accountId) {
+		payload.interopData = {
+			accountId: creds.interopData.accountId,
+			token: creds.interopData.token,
+			enableReadReceipts: creds.interopData.enableReadReceipts ?? true
+		}
 	}
 	return index_js_1.proto.ClientPayload.fromObject(payload)
 }

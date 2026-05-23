@@ -335,7 +335,7 @@ const makeSocket = config => {
 			node = (0, Utils_1.generateRegistrationNode)(creds, config)
 			logger.info({ node }, 'not logged in, attempting registration...')
 		} else {
-			node = (0, Utils_1.generateLoginNode)(creds.me.id, config)
+			node = (0, Utils_1.generateLoginNode)(creds.me.id, config, creds)
 			logger.info({ node }, 'logging in...')
 		}
 		const payloadEnc = noise.encrypt(index_js_1.proto.ClientPayload.encode(node).finish())

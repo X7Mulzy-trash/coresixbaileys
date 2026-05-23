@@ -345,7 +345,6 @@ const makeInteropSocket = sock => {
 	const resetInteropSession = async jid => {
 		await signalRepository.deleteSession([jid])
 		logger.info({ jid }, '[interop] session reset — next send will use pkmsg')
-		console.log('[interop] session reset for', jid, '— next sendMessage will use pkmsg (NEW SESSION)')
 	}
 
 	return {
