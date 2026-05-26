@@ -18,10 +18,12 @@ const { makeNewsletterSocket } = require('./newsletter')
  * Data path confirmed:  xwa2_username_check (C164057Wg.java:81)
  */
 const USERNAME_QUERY_IDS = {
-	CHECK: null, // UsernameCheck  — query_id TBD
-	SET: null, // UsernameSet    — query_id TBD
-	GET: null, // UsernameGet    — query_id TBD
-	PIN_SET: null // UsernamePinSet — query_id TBD
+	CHECK: '26124072630599520', // UsernameCheck
+	CHECK_MULTI: '27134626522840290', // UsernameCheckMulti
+	SET: '27108705368767936', // UsernameSet
+	GET: '32618050064506056', // UsernameGet
+	GET_RECOMMENDATIONS: '26077456248616956', // UsernameGetRecommendationsQuery
+	PIN_SET: '25529696019976770' // UsernamePinSet
 }
 
 /**
@@ -195,12 +197,37 @@ const makeUsernameSocket = config => {
 		return result?.list ?? []
 	}
 
+	/**
+	 * Check multiple usernames for availability at once.
+	 * @param {string[]} usernames - Array of usernames (without @)
+	 */
+	const checkUsernameMulti = async usernames => {
+		const data = await mexQuery(
+			{ usernames },
+			USERNAME_QUERY_IDS.CHECK_MULTI,
+			'xwa2_username_check_multi'
+		)
+		return data
+	}
+
+	/**
+	 * Fetch username recommendations for the current user.
+	 * @param {string} [source] - Source hint: 'FB' | 'IG' | 'USER_INPUT'
+	 */
+	const getUsernameRecommendations = async (source = null) => {
+		const variables = {}
+		if (source) variables.source = source
+		return mexQuery(variables, USERNAME_QUERY_IDS.GET_RECOMMENDATIONS, 'xwa2_username_get_recommendations')
+	}
+
 	return {
 		...sock,
 		checkUsername,
+		checkUsernameMulti,
 		setUsername,
 		deleteUsername,
 		getMyUsername,
+		getUsernameRecommendations,
 		setUsernamePin,
 		findUserByUsername,
 		fetchContactUsernames,

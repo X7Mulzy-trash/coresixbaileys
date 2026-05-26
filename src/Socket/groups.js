@@ -6,9 +6,36 @@ const Types_1 = require('../Types')
 const Utils_1 = require('../Utils')
 const WABinary_1 = require('../WABinary')
 const chats_1 = require('./chats')
+const mex_1 = require('./mex')
+
+const GROUP_MEX_QUERY_IDS = {
+	QUERY_INFO: '25530136513328492', // QueryGroupInfo
+	QUERY_INFO_BY_CODE: '24576337542042464', // QueryGroupInfoByCode
+	QUERY_BATCH: '26440064815661176', // QueryBatchGetGroups
+	QUERY_INVITE_LINK: '24558418350455204', // QueryInviteLink
+	QUERY_PARTICIPATING: '26664341543184776', // QueryParticipatingGroups
+	QUERY_SUGGESTED: '26012055225051916', // QuerySuggestedGroups
+	QUERY_LINKED: '25629003043401452', // QueryLinkedGroupInfo
+	QUERY_SUBGROUPS: '25554052094203120', // QuerySubgroups
+	ADD_PARTICIPANTS_V2: '32627550323510250', // AddParticipantsToGroupV2
+	ADD_PARTICIPANTS_V3: '26581073158212628', // AddParticipantsToGroupsV3
+	SET_PROPERTY: '24688994337458820', // SetGroupProperty
+	RESET_INVITE_LINK: '24812851838367452', // SetGroupResetInviteLink
+	CREATE_INVITE_CODE: '25207706598901440', // CreateInviteCode
+	CREATE_GROUP: '32341779532133480', // CreateGroup
+	ALLOW_NON_ADMIN_GROUP_CREATION: '32024438593867696', // AllowNonAdminGroupCreation
+	GET_INVITE_INFO: '24745668928467084', // GetInviteInfo
+	GET_PRE_REG_ADD_REQUESTS: '25018599251091280', // GetPreRegGroupAddRequestsQuery
+	GET_SUGGESTED_CONTACTS: '27208468032086900', // GetSuggestedContacts
+	STORE_INVITES_SMS: '25508574885415376', // GroupsStoreInvitesSMSMutation
+	LOG_SERVER_SENT_INVITE: '26580640204871220', // LogServerSentInviteIntent
+	QUERY_ONLINE_STATUS: '24599444653063564', // QueryOnlineStatusFromPDP
+	QUERY_ONLINE_STATUS_LAST_SEEN: '24653084284365540' // QueryOnlineStatusLastSeenFromPDP
+}
+
 const makeGroupsSocket = config => {
 	const sock = (0, chats_1.makeChatsSocket)(config)
-	const { authState, ev, query, upsertMessage } = sock
+	const { authState, ev, query, generateMessageTag, upsertMessage } = sock
 	const groupQuery = async (jid, type, content) =>
 		query({
 			tag: 'iq',
@@ -19,6 +46,9 @@ const makeGroupsSocket = config => {
 			},
 			content
 		})
+
+	const mexQuery = (variables, queryId, dataPath) =>
+		(0, mex_1.executeWMexQuery)(variables, queryId, dataPath, query, generateMessageTag)
 	const groupMetadata = async jid => {
 		const result = await groupQuery(jid, 'get', [{ tag: 'query', attrs: { request: 'interactive' } }])
 		return (0, exports.extractGroupMetadata)(result)
@@ -362,7 +392,193 @@ const makeGroupsSocket = config => {
 				})
 				.filter(l => !!l.jid)
 		},
-		groupFetchAllParticipating
+		groupFetchAllParticipating,
+
+		// ── MEX queries (JSON responses) ──────────────────────────────────────
+
+		/**
+		 * Fetch group info via MEX (richer than IQ — includes invite link, LID addressing, etc.)
+		 * @param {string} jid - Group JID
+		 */
+		groupQueryInfo: jid =>
+			mexQuery({ group_id: jid }, GROUP_MEX_QUERY_IDS.QUERY_INFO, 'xwa2_group_query_by_id'),
+
+		/**
+		 * Fetch group info by invite code via MEX.
+		 * @param {string} code - Group invite code (without the link prefix)
+		 */
+		groupQueryInfoByCode: code =>
+			mexQuery({ group_input: { invite_code: code } }, GROUP_MEX_QUERY_IDS.QUERY_INFO_BY_CODE, 'xwa2_group_query_by_id'),
+
+		/**
+		 * Fetch multiple groups at once via MEX.
+		 * @param {string[]} jids - Array of group JIDs
+		 */
+		groupQueryBatch: jids =>
+			mexQuery(
+				{ groups_input: jids.map(group_id => ({ group_id })) },
+				GROUP_MEX_QUERY_IDS.QUERY_BATCH,
+				'xwa2_group_query_batch'
+			),
+
+		/**
+		 * Fetch invite link info via MEX (includes expiration, creator, etc.)
+		 * @param {string} jid - Group JID
+		 */
+		groupQueryInviteLink: jid =>
+			mexQuery({ group_input: { group_id: jid } }, GROUP_MEX_QUERY_IDS.QUERY_INVITE_LINK, 'xwa2_group_query_by_id'),
+
+		/**
+		 * Fetch all groups the current user is participating in via MEX.
+		 * Returns richer data than the IQ-based groupFetchAllParticipating.
+		 */
+		groupQueryParticipating: () =>
+			mexQuery({}, GROUP_MEX_QUERY_IDS.QUERY_PARTICIPATING, 'xwa2_group_query_participating'),
+
+		/**
+		 * Fetch suggested groups (community sub-group suggestions) via MEX.
+		 * @param {string} communityJid - Community JID to get suggestions for
+		 */
+		groupQuerySuggested: communityJid =>
+			mexQuery(
+				{ group_input: { group_id: communityJid } },
+				GROUP_MEX_QUERY_IDS.QUERY_SUGGESTED,
+				'xwa2_group_query_by_id'
+			),
+
+		/**
+		 * Fetch linked subgroup info for a community group via MEX.
+		 * @param {string} jid - Group or community JID
+		 */
+		groupQueryLinked: jid =>
+			mexQuery({ group_input: { group_id: jid } }, GROUP_MEX_QUERY_IDS.QUERY_LINKED, 'xwa2_group_query_by_id'),
+
+		/**
+		 * Fetch subgroups of a community via MEX.
+		 * @param {string} communityJid - Community JID
+		 */
+		groupQuerySubgroups: communityJid =>
+			mexQuery(
+				{ group_input: { group_id: communityJid } },
+				GROUP_MEX_QUERY_IDS.QUERY_SUBGROUPS,
+				'xwa2_group_query_by_id'
+			),
+
+		/**
+		 * Add participants to a group via MEX (V2 — supports LID, privacy metadata).
+		 * Falls back to the IQ-based groupParticipantsUpdate for older servers.
+		 * @param {string} jid - Group JID
+		 * @param {string[]} participants - Array of JIDs to add
+		 */
+		groupAddParticipantsMex: (jid, participants) =>
+			mexQuery(
+				{ group_id: jid, participants: participants.map(p => ({ user_jid: p })) },
+				GROUP_MEX_QUERY_IDS.ADD_PARTICIPANTS_V2,
+				'xwa2_group_add_participants'
+			),
+
+		/**
+		 * Set a group property via MEX.
+		 * Known properties: member_add_mode, membership_approval_mode_enabled, member_share_group_history_mode
+		 * @param {string} jid - Group JID
+		 * @param {string} property - Property name
+		 * @param {*} value - Property value
+		 */
+		groupSetProperty: (jid, property, value) =>
+			mexQuery({ group_id: jid, [property]: value }, GROUP_MEX_QUERY_IDS.SET_PROPERTY, 'xwa2_group_set_property'),
+
+		/**
+		 * Reset a group's invite link via MEX (generates new code, invalidates old one).
+		 * @param {string} jid - Group JID
+		 */
+		groupResetInviteLinkMex: jid =>
+			mexQuery({ group_jid: jid }, GROUP_MEX_QUERY_IDS.RESET_INVITE_LINK, 'xwa2_group_reset_invite_link'),
+
+		/**
+		 * Create a group via MEX.
+		 * Confirmed from CreateGroup mutation — input: { subject, participants: [{jid}] }
+		 * @param {string} subject - Group name
+		 * @param {string[]} participantJids
+		 */
+		groupCreateMex: (subject, participantJids) =>
+			mexQuery(
+				{ input: { subject, participants: participantJids.map(jid => ({ jid })) } },
+				GROUP_MEX_QUERY_IDS.CREATE_GROUP,
+				'xwa2_group_create'
+			),
+
+		/**
+		 * Allow non-admin community members to create subgroups.
+		 * @param {string} communityJid - Community JID
+		 * @param {boolean} allow
+		 */
+		groupAllowNonAdminCreation: (communityJid, allow) =>
+			mexQuery(
+				{ group_jid: communityJid, allow_non_admin_sub_group_creation: allow },
+				GROUP_MEX_QUERY_IDS.ALLOW_NON_ADMIN_GROUP_CREATION,
+				'xwa2_group_allow_non_admin_creation'
+			),
+
+		/**
+		 * Get info about a group invite link (before joining).
+		 * @param {string} inviteCode - The raw invite code (not full URL)
+		 */
+		groupGetInviteInfo: inviteCode =>
+			mexQuery({ invite_code: inviteCode }, GROUP_MEX_QUERY_IDS.GET_INVITE_INFO, 'xwa2_group_get_invite_info'),
+
+		/**
+		 * Fetch pending add requests for pre-registration group invites.
+		 * @param {string} jid - Group JID
+		 */
+		groupPreRegAddRequests: jid =>
+			mexQuery({ group_jid: jid }, GROUP_MEX_QUERY_IDS.GET_PRE_REG_ADD_REQUESTS, 'xwa2_group_pre_reg_add_requests'),
+
+		/**
+		 * Get suggested contacts to add to a group.
+		 * @param {string} jid - Group JID
+		 */
+		groupSuggestedContacts: jid =>
+			mexQuery({ group_jid: jid }, GROUP_MEX_QUERY_IDS.GET_SUGGESTED_CONTACTS, 'xwa2_group_suggested_contacts'),
+
+		/**
+		 * Store SMS invite links for a group.
+		 * @param {string} jid - Group JID
+		 * @param {{ phone: string, inviteCode: string }[]} invites
+		 */
+		groupStoreInvitesSms: (jid, invites) =>
+			mexQuery(
+				{ group_jid: jid, invites: invites.map(({ phone, inviteCode }) => ({ phone, invite_code: inviteCode })) },
+				GROUP_MEX_QUERY_IDS.STORE_INVITES_SMS,
+				'xwa2_group_store_invites_sms'
+			),
+
+		/**
+		 * Log a server-sent invite intent (analytics).
+		 * @param {string} jid - Group JID
+		 * @param {string} inviteCode
+		 */
+		groupLogServerSentInvite: (jid, inviteCode) =>
+			mexQuery(
+				{ group_jid: jid, invite_code: inviteCode },
+				GROUP_MEX_QUERY_IDS.LOG_SERVER_SENT_INVITE,
+				'xwa2_group_log_server_sent_invite'
+			),
+
+		/**
+		 * Query online status of users from PDP.
+		 * @param {string[]} jids - User JIDs
+		 */
+		queryOnlineStatus: jids =>
+			mexQuery({ jids }, GROUP_MEX_QUERY_IDS.QUERY_ONLINE_STATUS, 'xwa2_query_online_status'),
+
+		/**
+		 * Query online status and last seen of users from PDP.
+		 * @param {string[]} jids - User JIDs
+		 */
+		queryOnlineStatusLastSeen: jids =>
+			mexQuery({ jids }, GROUP_MEX_QUERY_IDS.QUERY_ONLINE_STATUS_LAST_SEEN, 'xwa2_query_online_status_last_seen'),
+
+		GROUP_MEX_QUERY_IDS
 	}
 }
 exports.makeGroupsSocket = makeGroupsSocket

@@ -40,6 +40,25 @@ A high-performance WhatsApp Web library built on [Baileys](https://github.com/Wh
 
 ---
 
+## Feature Documentation
+
+| Topic | File |
+|-------|------|
+| MEX — WhatsApp's internal GraphQL protocol | [MEX.md](MEX.md) |
+| USync — Bulk user data queries (devices, status, picture, LID) | [USYNC.md](USYNC.md) |
+| HTTPS GraphQL — Meta AI, Events, Payments | [GRAPHQL.md](GRAPHQL.md) |
+| Privacy, Profile & Account | [PRIVACY.md](PRIVACY.md) |
+| Registration, Passkeys & Account Management | [REGISTRATION.md](REGISTRATION.md) |
+| Managed Accounts, Payments Passkey & IPLS | [MANAGED-ACCOUNT.md](MANAGED-ACCOUNT.md) |
+| Communities & AI Groups | [COMMUNITIES.md](COMMUNITIES.md) |
+| Interoperability (BirdyChat, Haiket, DMA) | [INTEROP.md](INTEROP.md) |
+| Username (`@username`) | [USERNAME.md](USERNAME.md) |
+| Anti-Ban System | [ANTIBAN.md](ANTIBAN.md) |
+| Ban & Enforcement System (APK internals) | [BAN-SYSTEM.md](BAN-SYSTEM.md) |
+| WhatsApp Protocol Reference (APK namespaces) | [PROTOCOLS.md](PROTOCOLS.md) |
+
+---
+
 ## What's Different
 
 **Performance — Rust WASM**

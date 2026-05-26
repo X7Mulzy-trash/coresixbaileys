@@ -3,6 +3,17 @@ Object.defineProperty(exports, '__esModule', { value: true })
 exports.makeInteropSocket = void 0
 
 const { getBinaryNodeChild, getBinaryNodeChildren, S_WHATSAPP_NET } = require('../WABinary')
+const { executeWMexQuery } = require('./mex')
+
+const INTEROP_MEX_QUERY_IDS = {
+	CREATE_GROUP: '25726817620301612', // GroupsCreateInteropGroup
+	LEAVE_GROUP: '25346167795013270', // LeaveInteropGroup
+	ADD_PARTICIPANTS: '25732168276369452', // AddParticipantsToInteropGroup
+	QUERY_GROUP_INFO: '32734144032867936', // QueryInteropGroupInfo
+	PRIVACY_SETTINGS_QUERY: '24849123668112656', // InteropPrivacySettingsQuery
+	PRIVACY_SETTINGS_UPDATE: '25421856497452764', // InteropPrivacySettingsUpdate
+	PRIVACY_SETTINGS_WITH_CONTACT_LIST: '24913399124998600' // InteropPrivacySettingWithContactListUpdate
+}
 
 /**
  * Known integrator IDs (assigned by WhatsApp).
@@ -24,7 +35,10 @@ const TOS_RESULT_ACCEPTED = '160'
 const INTEROP_BATCH_MAX = 256
 
 const makeInteropSocket = sock => {
-	const { query, logger, signalRepository } = sock
+	const { query, generateMessageTag, logger, signalRepository } = sock
+
+	const mexQuery = (variables, queryId, dataPath) =>
+		executeWMexQuery(variables, queryId, dataPath, query, generateMessageTag)
 
 	/**
 	 * Fetch all available interop integrators from the server.
@@ -347,6 +361,162 @@ const makeInteropSocket = sock => {
 		logger.info({ jid }, '[interop] session reset — next send will use pkmsg')
 	}
 
+	/**
+	 * Create an interop group via MEX.
+	 * Confirmed from C80913Xf.java opcode 15:
+	 *   input: { participants: [{ jid }] }
+	 *   dataPath: xwa2_interop_group_create
+	 *
+	 * @param {string[]} participants - Interop JIDs to add
+	 * @returns {{ gid, creationTime, creator, participants }}
+	 */
+	const createInteropGroup = async participants => {
+		const result = await mexQuery(
+			{ input: { participants: participants.map(jid => ({ jid })) } },
+			INTEROP_MEX_QUERY_IDS.CREATE_GROUP,
+			'xwa2_interop_group_create'
+		)
+		logger.info({ participants }, '[interop] group created via MEX')
+		return result
+	}
+
+	/**
+	 * Leave one or more interop groups via MEX.
+	 * Confirmed from C80913Xf.java opcode 28:
+	 *   input: { groups_to_leave: [{ gid }] }
+	 *   dataPath: xwa2_interop_group_leave
+	 *
+	 * gid is the raw interop group ID (without @g.us suffix).
+	 * @param {string|string[]} jids - Interop group JID(s)
+	 */
+	const leaveInteropGroup = async jids => {
+		const ids = Array.isArray(jids) ? jids : [jids]
+		const result = await mexQuery(
+			{ input: { groups_to_leave: ids.map(jid => ({ gid: jid.split('@')[0] })) } },
+			INTEROP_MEX_QUERY_IDS.LEAVE_GROUP,
+			'xwa2_interop_group_leave'
+		)
+		logger.info({ jids: ids }, '[interop] left group(s) via MEX')
+		return result
+	}
+
+	/**
+	 * Add participants to an existing interop group via MEX.
+	 * Confirmed from C3Wt.java opcode 9:
+	 *   input: { gid, participants: [{ jid }] }
+	 *   dataPath: xwa2_interop_add_participants_to_group
+	 *
+	 * @param {string} groupJid - Interop group JID
+	 * @param {string[]} participants - Interop JIDs to add
+	 */
+	const addParticipantsToInteropGroup = async (groupJid, participants) => {
+		const gid = groupJid.split('@')[0]
+		return mexQuery(
+			{ input: { gid, participants: participants.map(jid => ({ jid })) } },
+			INTEROP_MEX_QUERY_IDS.ADD_PARTICIPANTS,
+			'xwa2_interop_add_participants_to_group'
+		)
+	}
+
+	/**
+	 * Query info about an interop group via MEX.
+	 * Confirmed from C3Wt.java opcode 10:
+	 *   group_input: { gid }
+	 *   dataPath: xwa2_interop_group_query_by_id
+	 *
+	 * @param {string} groupJid - Interop group JID
+	 */
+	const queryInteropGroupInfo = async groupJid => {
+		const gid = groupJid.split('@')[0]
+		return mexQuery(
+			{ group_input: { gid } },
+			INTEROP_MEX_QUERY_IDS.QUERY_GROUP_INFO,
+			'xwa2_interop_group_query_by_id'
+		)
+	}
+
+	/**
+	 * Update an interop privacy setting via MEX.
+	 * Confirmed from C24385Ak0.java (InteropPrivacySettingsUpdate):
+	 *   feature, setting
+	 *   dataPath: xwa2_interop_privacy_setting_update
+	 *
+	 * Known features: "GROUPADD"
+	 * Known settings: "ALL" | "CONTACTS" | "NONE"
+	 *
+	 * @param {string} feature - Privacy feature name
+	 * @param {string} setting - New value
+	 */
+	const updateInteropPrivacySetting = async (feature, setting) => {
+		return mexQuery(
+			{ feature, setting },
+			INTEROP_MEX_QUERY_IDS.PRIVACY_SETTINGS_UPDATE,
+			'xwa2_interop_privacy_setting_update'
+		)
+	}
+
+	/**
+	 * Update an interop privacy setting with an explicit contact list via MEX.
+	 * Confirmed from C24388Ak8.java (InteropPrivacySettingWithContactListUpdate):
+	 *   feature, setting, contacts[], contact_list_type, dhash
+	 *   dataPath: xwa2_interop_privacy_setting_with_contact_list_update
+	 *
+	 * Used when setting is "CONTACTS" and you want to specify exact allowed contacts.
+	 *
+	 * @param {string} feature - Privacy feature (e.g. "GROUPADD")
+	 * @param {string} setting - "CONTACTS"
+	 * @param {string[]} contacts - List of JIDs to allow
+	 * @param {string} contactListType - Contact list type string
+	 * @param {string} [dhash] - Hash of the current contact list (or null/"none")
+	 */
+	const updateInteropPrivacySettingWithContactList = async (
+		feature,
+		setting,
+		contacts,
+		contactListType,
+		dhash = 'none'
+	) => {
+		return mexQuery(
+			{ feature, setting, contacts, contact_list_type: contactListType, dhash },
+			INTEROP_MEX_QUERY_IDS.PRIVACY_SETTINGS_WITH_CONTACT_LIST,
+			'xwa2_interop_privacy_setting_with_contact_list_update'
+		)
+	}
+
+	/**
+	 * Check whether an interop user allows being added to groups (GROUPADD privacy).
+	 * Returns true if the user can be added, false if blocked by their privacy settings.
+	 *
+	 * Mirrors InteropPrivacySettingsManager.A01() in the APK which queries
+	 * the "GROUPADD" feature for the given account.
+	 */
+	const getInteropGroupAddPrivacy = async (jid, integratorId) => {
+		const result = await query({
+			tag: 'iq',
+			attrs: { type: 'get', xmlns: 'w:interop', to: S_WHATSAPP_NET },
+			content: [
+				{
+					tag: 'privacy',
+					attrs: { feature: 'GROUPADD' },
+					content: [
+						{
+							tag: 'user',
+							attrs: {
+								jid,
+								integrator_id: integratorId.toString()
+							}
+						}
+					]
+				}
+			]
+		})
+		const privacyNode = getBinaryNodeChild(result, 'privacy')
+		const userNode = getBinaryNodeChild(privacyNode, 'user')
+		// "allowed" means the server confirmed the user can be added; any other value or
+		// absence of the attribute means the privacy setting blocks the add.
+		return userNode?.attrs?.result === 'allowed'
+	}
+
 	return {
 		...sock,
 		fetchIntegrators,
@@ -363,8 +533,16 @@ const makeInteropSocket = sock => {
 		trustInteropContact,
 		initInterop,
 		resetInteropSession,
+		createInteropGroup,
+		leaveInteropGroup,
+		addParticipantsToInteropGroup,
+		queryInteropGroupInfo,
+		updateInteropPrivacySetting,
+		updateInteropPrivacySettingWithContactList,
+		getInteropGroupAddPrivacy,
 		INTEGRATOR_BIRDYCHAT,
-		INTEGRATOR_HAIKET
+		INTEGRATOR_HAIKET,
+		INTEROP_MEX_QUERY_IDS
 	}
 }
 

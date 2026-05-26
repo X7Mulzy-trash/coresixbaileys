@@ -54,6 +54,9 @@ const makeChatsSocket = config => {
 		unblockInteropUser,
 		reportInteropSpam,
 		trustInteropContact,
+		createInteropGroup,
+		leaveInteropGroup,
+		getInteropGroupAddPrivacy,
 		INTEGRATOR_BIRDYCHAT,
 		INTEGRATOR_HAIKET
 	} = sock
@@ -158,6 +161,70 @@ const makeChatsSocket = config => {
 	const updateStatusPrivacy = async value => {
 		await privacyQuery('status', value)
 	}
+	/**
+	 * Fetch status privacy settings via `xmlns="status"` IQ GET.
+	 * Returns the current distribution type and any custom lists.
+	 * Source: GetStatusPrivacyJob.java, feature flag 3843 controls retry.
+	 */
+	const getStatusPrivacy = async () => {
+		const result = await query({
+			tag: 'iq',
+			attrs: {
+				xmlns: 'status',
+				to: WABinary_1.S_WHATSAPP_NET,
+				type: 'get'
+			},
+			content: [{ tag: 'privacy', attrs: {} }]
+		})
+		const privacyNode = result?.content?.[0]
+		if (!privacyNode) return null
+		const lists = []
+		for (const listNode of (privacyNode.content || [])) {
+			const { type, id, listname, emoji, selected, deleted } = listNode.attrs || {}
+			const members = (listNode.content || []).map(u => u.attrs?.jid).filter(Boolean)
+			lists.push({ type, id, listname, emoji, selected: selected === 'true', deleted: deleted === 'true', members })
+		}
+		return lists
+	}
+	/**
+	 * Set status privacy via `xmlns="status"` IQ SET.
+	 * Supports simple distribution types and contact-level whitelist/blacklist/customlist.
+	 *
+	 * @param {'contacts'|'whitelist'|'blacklist'|'null'} type - Distribution type
+	 * @param {string[]} [jids] - JIDs for the list (whitelist/blacklist)
+	 * @param {Array<{id: string, listname: string, emoji?: string, selected?: boolean, deleted?: boolean, members?: string[]}>} [customLists]
+	 */
+	const setStatusPrivacy = async (type, jids = [], customLists = []) => {
+		const content = []
+		// main distribution list
+		const mainList = {
+			tag: 'list',
+			attrs: { type },
+			content: jids.map(jid => ({ tag: 'user', attrs: { jid }, content: [] }))
+		}
+		content.push(mainList)
+		// custom named lists
+		for (const cl of customLists) {
+			const attrs = { type: 'customlist', id: cl.id, listname: cl.listname }
+			if (cl.emoji) attrs.emoji = cl.emoji
+			if (cl.selected) attrs.selected = 'true'
+			if (cl.deleted) attrs.deleted = 'true'
+			content.push({
+				tag: 'list',
+				attrs,
+				content: (cl.members || []).map(jid => ({ tag: 'user', attrs: { jid }, content: [] }))
+			})
+		}
+		await query({
+			tag: 'iq',
+			attrs: {
+				xmlns: 'status',
+				to: WABinary_1.S_WHATSAPP_NET,
+				type: 'set'
+			},
+			content: [{ tag: 'privacy', attrs: {}, content }]
+		})
+	}
 	const updateReadReceiptsPrivacy = async value => {
 		await privacyQuery('readreceipts', value)
 	}
@@ -182,6 +249,38 @@ const makeChatsSocket = config => {
 			]
 		})
 	}
+	/**
+	 * Fetch broadcast list quota from the server.
+	 * Source: BroadcastListQuotaProtocol.java — IQ xmlns="w:biz", 32s timeout.
+	 *
+	 * Returns: { messagesLeft, totalLimit, isHeavySender, startTs, endTs, resetTs }
+	 */
+	const fetchBroadcastListQuota = async () => {
+		const result = await query(
+			{
+				tag: 'iq',
+				attrs: {
+					xmlns: 'w:biz',
+					to: WABinary_1.S_WHATSAPP_NET,
+					type: 'get'
+				},
+				content: [{ tag: 'broadcast_list_quota', attrs: {}, content: [] }]
+			},
+			32000
+		)
+		const limitsNode = (0, WABinary_1.getBinaryNodeChild)(result, 'limits')
+		const timeframeNode = (0, WABinary_1.getBinaryNodeChild)(result, 'timeframe')
+		if (!limitsNode) return null
+		return {
+			messagesLeft: parseInt(limitsNode.attrs?.messages_left ?? (0, WABinary_1.getBinaryNodeChild)(limitsNode, 'messages_left')?.content ?? '0'),
+			totalLimit: parseInt(limitsNode.attrs?.total_limit ?? (0, WABinary_1.getBinaryNodeChild)(limitsNode, 'total_limit')?.content ?? '0'),
+			isHeavySender: (limitsNode.attrs?.is_heavy_sender ?? (0, WABinary_1.getBinaryNodeChild)(limitsNode, 'is_heavy_sender')?.content) === 'true',
+			startTs: parseInt(timeframeNode?.attrs?.start_ts_s ?? (0, WABinary_1.getBinaryNodeChild)(timeframeNode, 'start_ts_s')?.content ?? '0'),
+			endTs: parseInt(timeframeNode?.attrs?.end_ts_s ?? (0, WABinary_1.getBinaryNodeChild)(timeframeNode, 'end_ts_s')?.content ?? '0'),
+			resetTs: parseInt(timeframeNode?.attrs?.reset_ts_s ?? (0, WABinary_1.getBinaryNodeChild)(timeframeNode, 'reset_ts_s')?.content ?? '0')
+		}
+	}
+
 	const getBotListV2 = async () => {
 		const resp = await query({
 			tag: 'iq',
@@ -1154,6 +1253,129 @@ const makeChatsSocket = config => {
 		}
 	}
 	/**
+	 * Fetch AB-test (abt) props from server.
+	 * Mirrors ABPropsProtocolHelper — protocol 1 or 2, optional hash/refresh_id/group.
+	 */
+	const fetchABProps = async (protocol = '2', hash = '', refreshId = null, group = null) => {
+		const propAttrs = { protocol }
+		if (hash) propAttrs.hash = hash
+		if (refreshId != null) propAttrs.refresh_id = String(refreshId)
+		if (group != null) propAttrs.group = String(group)
+		const result = await query({
+			tag: 'iq',
+			attrs: { to: WABinary_1.S_WHATSAPP_NET, xmlns: 'abt', type: 'get' },
+			content: [{ tag: 'props', attrs: propAttrs }]
+		})
+		const propsNode = (0, WABinary_1.getBinaryNodeChild)(result, 'props')
+		if (!propsNode) return {}
+		return (0, WABinary_1.reduceBinaryNodeToDictionary)(propsNode, 'prop')
+	}
+	/**
+	 * Remove a companion (linked) device from the account.
+	 * Mirrors CompanionDeviceRemovalJob — xmlns="md", child tag "remove-companion-device".
+	 * reason: "user_initiated" | "server_initiated" | any WA-defined reason string.
+	 */
+	const removeCompanionDevice = async (keyIndex, reason = 'user_initiated') => {
+		await query({
+			tag: 'iq',
+			attrs: { to: WABinary_1.S_WHATSAPP_NET, xmlns: 'md', type: 'set' },
+			content: [
+				{
+					tag: 'remove-companion-device',
+					attrs: { platform: 'true', reason, id: String(keyIndex) }
+				}
+			]
+		})
+	}
+	/**
+	 * Push an updated key-index-list to the server (multi-device key announcement).
+	 * Mirrors KeyIndexListJob — xmlns="md", child tag "key-index-list" with a binary proto body.
+	 * ts: unix timestamp seconds (string or number).
+	 * content: Buffer — serialized proto KeyIndexList.
+	 */
+	const updateKeyIndexList = async (ts, content) => {
+		await query({
+			tag: 'iq',
+			attrs: { to: WABinary_1.S_WHATSAPP_NET, xmlns: 'md', type: 'set' },
+			content: [
+				{
+					tag: 'key-index-list',
+					attrs: { ts: String(ts) },
+					content
+				}
+			]
+		})
+	}
+	/**
+	 * Request a media upload connection token from the server.
+	 * Mirrors MediaConnFetcher — xmlns="w:m", type="set", optional last_id.
+	 * Returns the raw media_conn node.
+	 */
+	const fetchMediaConn = async (lastId = null) => {
+		const attrs = {}
+		if (lastId != null) attrs.last_id = String(lastId)
+		const result = await query({
+			tag: 'iq',
+			attrs: { to: WABinary_1.S_WHATSAPP_NET, xmlns: 'w:m', type: 'set' },
+			content: [{ tag: 'media_conn', attrs }]
+		})
+		return (0, WABinary_1.getBinaryNodeChild)(result, 'media_conn') || null
+	}
+	/**
+	 * Delete a broadcast list by ID.
+	 * Mirrors BroadcastListDeleteJob — xmlns="w:b", wraps <delete><list id="..."/></delete>.
+	 */
+	const deleteBroadcastList = async listId => {
+		await query({
+			tag: 'iq',
+			attrs: { to: WABinary_1.S_WHATSAPP_NET, xmlns: 'w:b', type: 'set' },
+			content: [
+				{
+					tag: 'delete',
+					attrs: {},
+					content: [{ tag: 'list', attrs: { id: String(listId) } }]
+				}
+			]
+		})
+	}
+	/**
+	 * Fetch a QR code from the server (e.g. for linked-device linking).
+	 * Mirrors QRCodeFetcher — xmlns="w:qr", type="get".
+	 * addressingMode: "lid" | undefined — set to "lid" for LID-addressed QR.
+	 */
+	const fetchQRCode = async (code, addressingMode = null) => {
+		const attrs = { code }
+		if (addressingMode) attrs.addressing_mode = addressingMode
+		const result = await query({
+			tag: 'iq',
+			attrs: { to: WABinary_1.S_WHATSAPP_NET, xmlns: 'w:qr', type: 'get' },
+			content: [{ tag: 'qr', attrs }]
+		})
+		return (0, WABinary_1.getBinaryNodeChild)(result, 'qr') || null
+	}
+	/**
+	 * Confirm or deny a device-logout request from the server.
+	 * Mirrors AccountDefenceDeviceLogoutJob — xmlns="w:account_defence", smax_id=87.
+	 * approve: true to confirm the logout, false to deny.
+	 */
+	const confirmDeviceLogout = async (id, approve = true) => {
+		await query({
+			tag: 'iq',
+			attrs: {
+				to: WABinary_1.S_WHATSAPP_NET,
+				xmlns: 'w:account_defence',
+				type: 'set',
+				smax_id: '87'
+			},
+			content: [
+				{
+					tag: 'device_logout',
+					attrs: { approve: approve ? 'true' : 'false', id: String(id) }
+				}
+			]
+		})
+	}
+	/**
 	 * queries need to be fired on connection open
 	 * help ensure parity with WA Web
 	 * */
@@ -1411,9 +1633,12 @@ const makeChatsSocket = config => {
 		updateOnlinePrivacy,
 		updateProfilePicturePrivacy,
 		updateStatusPrivacy,
+		getStatusPrivacy,
+		setStatusPrivacy,
 		updateReadReceiptsPrivacy,
 		updateGroupsAddPrivacy,
 		updateDefaultDisappearingMode,
+		fetchBroadcastListQuota,
 		getBusinessProfile,
 		resyncAppState,
 		chatModify,
@@ -1461,8 +1686,18 @@ const makeChatsSocket = config => {
 		reportInteropSpam,
 		trustInteropContact,
 		initInterop,
+		createInteropGroup,
+		leaveInteropGroup,
+		getInteropGroupAddPrivacy,
 		INTEGRATOR_BIRDYCHAT,
-		INTEGRATOR_HAIKET
+		INTEGRATOR_HAIKET,
+		fetchABProps,
+		removeCompanionDevice,
+		updateKeyIndexList,
+		fetchMediaConn,
+		deleteBroadcastList,
+		fetchQRCode,
+		confirmDeviceLogout
 	}
 }
 exports.makeChatsSocket = makeChatsSocket

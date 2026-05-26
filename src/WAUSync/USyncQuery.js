@@ -4,6 +4,10 @@ exports.USyncQuery = void 0
 const WABinary_1 = require('../WABinary')
 const USyncBotProfileProtocol_1 = require('./Protocols/USyncBotProfileProtocol')
 const USyncLIDProtocol_1 = require('./Protocols/USyncLIDProtocol')
+const USyncBusinessProtocol_1 = require('./Protocols/USyncBusinessProtocol')
+const USyncPictureProtocol_1 = require('./Protocols/USyncPictureProtocol')
+const USyncTextStatusProtocol_1 = require('./Protocols/USyncTextStatusProtocol')
+const USyncSidelistProtocol_1 = require('./Protocols/USyncSidelistProtocol')
 const Protocols_1 = require('./Protocols')
 class USyncQuery {
 	constructor() {
@@ -42,9 +46,8 @@ class USyncQuery {
 		//TODO: implement error backoff, refresh etc.
 		//TODO: see if there are any errors in the result node
 		//const resultNode = getBinaryNodeChild(usyncNode, 'result')
-		const listNode = usyncNode ? (0, WABinary_1.getBinaryNodeChild)(usyncNode, 'list') : undefined
-		if (listNode?.content && Array.isArray(listNode.content)) {
-			queryResult.list = listNode.content.reduce((acc, node) => {
+		const parseUserNodes = nodes => {
+			return nodes.reduce((acc, node) => {
 				const id = node?.attrs.jid
 				if (id) {
 					const data = Array.isArray(node?.content)
@@ -67,8 +70,14 @@ class USyncQuery {
 				return acc
 			}, [])
 		}
-		//TODO: implement side list
-		//const sideListNode = getBinaryNodeChild(usyncNode, 'side_list')
+		const listNode = usyncNode ? (0, WABinary_1.getBinaryNodeChild)(usyncNode, 'list') : undefined
+		if (listNode?.content && Array.isArray(listNode.content)) {
+			queryResult.list = parseUserNodes(listNode.content)
+		}
+		const sideListNode = usyncNode ? (0, WABinary_1.getBinaryNodeChild)(usyncNode, 'side_list') : undefined
+		if (sideListNode?.content && Array.isArray(sideListNode.content)) {
+			queryResult.sideList = parseUserNodes(sideListNode.content)
+		}
 		return queryResult
 	}
 	withDeviceProtocol() {
@@ -97,6 +106,22 @@ class USyncQuery {
 	}
 	withUsernameProtocol() {
 		this.protocols.push(new Protocols_1.USyncUsernameProtocol())
+		return this
+	}
+	withBusinessProtocol(profileVersion) {
+		this.protocols.push(new USyncBusinessProtocol_1.USyncBusinessProtocol(profileVersion))
+		return this
+	}
+	withPictureProtocol(type) {
+		this.protocols.push(new USyncPictureProtocol_1.USyncPictureProtocol(type))
+		return this
+	}
+	withTextStatusProtocol() {
+		this.protocols.push(new USyncTextStatusProtocol_1.USyncTextStatusProtocol())
+		return this
+	}
+	withSidelistProtocol(useLidAddressing) {
+		this.protocols.push(new USyncSidelistProtocol_1.USyncSidelistProtocol(useLidAddressing))
 		return this
 	}
 }

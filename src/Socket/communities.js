@@ -12,9 +12,21 @@ const Utils_1 = require('../Utils')
 const logger_1 = __importDefault(require('../Utils/logger'))
 const WABinary_1 = require('../WABinary')
 const business_1 = require('./business')
+const mex_1 = require('./mex')
+
+const COMMUNITY_MEX_QUERY_IDS = {
+	QUERY_PARTICIPANT_COUNT: '31981537024824320', // QueryCommunityParticipantCount
+	QUERY_SUBGROUPS: '25554052094203120', // QuerySubgroups (shared with groups)
+	QUERY_SUBGROUP_PARTICIPANT_COUNT: '24784259781196780', // QuerySubgroupParticipantCount
+	UPDATE_OWNER: '24781435194845316' // UpdateCommunityOwner
+}
+
 const makeCommunitiesSocket = config => {
 	const sock = (0, business_1.makeBusinessSocket)(config)
-	const { authState, ev, query, upsertMessage } = sock
+	const { authState, ev, query, generateMessageTag, upsertMessage } = sock
+
+	const mexQuery = (variables, queryId, dataPath) =>
+		(0, mex_1.executeWMexQuery)(variables, queryId, dataPath, query, generateMessageTag)
 	const communityQuery = async (jid, type, content) =>
 		query({
 			tag: 'iq',
@@ -420,7 +432,7 @@ const makeCommunitiesSocket = config => {
 		 * Deactivate/delete a community
 		 */
 		communityDeactivate: async jid => {
-			await communityQuery(jid, 'set', [{ tag: 'delete', attrs: {} }])
+			await communityQuery(jid, 'set', [{ tag: 'delete_parent', attrs: {} }])
 		},
 		/**
 		 * Get info about a community from an invite link code
@@ -438,7 +450,56 @@ const makeCommunitiesSocket = config => {
 				: { tag: 'not_ephemeral', attrs: {} }
 			await communityQuery(jid, 'set', [content])
 		},
-		communityFetchAllParticipating
+		communityFetchAllParticipating,
+
+		// ── MEX queries (JSON responses) ──────────────────────────────────────
+
+		/**
+		 * Fetch total participant count of a community via MEX.
+		 * @param {string} jid - Community JID
+		 */
+		communityParticipantCount: jid =>
+			mexQuery(
+				{ group_input: { group_id: jid } },
+				COMMUNITY_MEX_QUERY_IDS.QUERY_PARTICIPANT_COUNT,
+				'xwa2_group_query_by_id'
+			),
+
+		/**
+		 * Fetch subgroups of a community via MEX (includes hidden_group, join approval state, etc.)
+		 * @param {string} jid - Community JID
+		 */
+		communitySubgroupsMex: jid =>
+			mexQuery({ group_input: { group_id: jid } }, COMMUNITY_MEX_QUERY_IDS.QUERY_SUBGROUPS, 'xwa2_group_query_by_id'),
+
+		/**
+		 * Fetch participant count of a specific subgroup within a community.
+		 * @param {string} subgroupJid - Subgroup JID
+		 */
+		communitySubgroupParticipantCount: subgroupJid =>
+			mexQuery(
+				{ group_input: { group_id: subgroupJid } },
+				COMMUNITY_MEX_QUERY_IDS.QUERY_SUBGROUP_PARTICIPANT_COUNT,
+				'xwa2_group_query_by_id'
+			),
+
+		/**
+		 * Transfer community ownership to a new owner via MEX.
+		 * Sends role_updates: [{ user_jid, new_role: "SUPERADMIN_MEMBER" }]
+		 * @param {string} communityJid - Community JID
+		 * @param {string} newOwnerJid - JID of the new owner
+		 */
+		communityTransferOwnershipMex: (communityJid, newOwnerJid) =>
+			mexQuery(
+				{
+					group_id: communityJid,
+					role_updates: [{ user_jid: newOwnerJid, new_role: 'SUPERADMIN_MEMBER' }]
+				},
+				COMMUNITY_MEX_QUERY_IDS.UPDATE_OWNER,
+				'xwa2_community_update_owner'
+			),
+
+		COMMUNITY_MEX_QUERY_IDS
 	}
 }
 exports.makeCommunitiesSocket = makeCommunitiesSocket

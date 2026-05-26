@@ -317,6 +317,69 @@ main()
 
 ---
 
+## Interop Groups (MEX)
+
+Interop groups allow WhatsApp users to create groups that include third-party messaging contacts. These use the MEX protocol internally.
+
+```js
+// Create an interop group with participants
+const group = await sock.createInteropGroup([
+    '12-105012705411308@interop',
+    '13-19146088152@interop'
+])
+// Returns: { gid, creationTime, creator, participants }
+
+// Add participants to an existing interop group
+await sock.addParticipantsToInteropGroup(
+    '120363000000000000@g.us',
+    ['12-105012705411308@interop']
+)
+
+// Query info about an interop group
+const info = await sock.queryInteropGroupInfo('120363000000000000@g.us')
+
+// Leave one or more interop groups
+await sock.leaveInteropGroup('120363000000000000@g.us')
+await sock.leaveInteropGroup(['120363000000000000@g.us', '120363000000000001@g.us'])
+```
+
+## Interop Privacy Settings (MEX)
+
+Control who can add you to interop groups:
+
+```js
+// Check if a specific interop user can add you to groups
+const canAdd = await sock.getInteropGroupAddPrivacy(
+    '12-105012705411308@interop',
+    12 // integrator ID
+)
+// Returns true/false
+
+// Update your GROUPADD privacy setting
+// Features: "GROUPADD"
+// Settings: "ALL" | "CONTACTS" | "NONE"
+await sock.updateInteropPrivacySetting('GROUPADD', 'CONTACTS')
+
+// Update GROUPADD with a specific allowed contact list
+await sock.updateInteropPrivacySettingWithContactList(
+    'GROUPADD',
+    'CONTACTS',
+    ['12-105012705411308@interop'],
+    'contact_list_type_string',
+    'dhash_or_none'
+)
+```
+
+## Session Management
+
+```js
+// Reset the Signal session with an interop contact
+// Use this if messages stop arriving or fail to decrypt
+await sock.resetInteropSession('12-105012705411308@interop')
+```
+
+---
+
 ## Protocol Details
 
 ### Stanza flow during init

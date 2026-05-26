@@ -332,6 +332,447 @@ const makeNewsletterSocket = config => {
 					}
 				]
 			})
+		},
+		/**
+		 * Invite a user to become an admin of a newsletter.
+		 *
+		 * @param {string} jid - Newsletter JID
+		 * @param {string} userJid - JID of the user to invite
+		 */
+		newsletterInviteAdmin: async (jid, userJid) => {
+			return executeWMexQuery(
+				{ newsletter_id: jid, user_id: userJid },
+				Types_1.QueryIds.ADMIN_INVITE,
+				Types_1.XWAPaths.xwa2_newsletter_admin_invite_create
+			)
+		},
+		/**
+		 * Revoke a pending admin invite for a newsletter.
+		 *
+		 * @param {string} jid - Newsletter JID
+		 * @param {string} userJid - JID of the invited user to revoke
+		 */
+		newsletterRevokeAdminInvite: async (jid, userJid) => {
+			return executeWMexQuery(
+				{ newsletter_id: jid, user_id: userJid },
+				Types_1.QueryIds.ADMIN_INVITE_REVOKE,
+				Types_1.XWAPaths.xwa2_newsletter_admin_invite_revoke
+			)
+		},
+		/**
+		 * Accept an admin invite to a newsletter (called by the invitee).
+		 *
+		 * @param {string} jid - Newsletter JID
+		 */
+		newsletterAcceptAdminInvite: async jid => {
+			return executeWMexQuery(
+				{ newsletter_id: jid },
+				Types_1.QueryIds.ADMIN_INVITE_ACCEPT,
+				Types_1.XWAPaths.xwa2_newsletter_admin_invite_accept
+			)
+		},
+		/**
+		 * Fetch admin-side metadata for a newsletter.
+		 *
+		 * @param {string} jid - Newsletter JID
+		 * @param {object} options
+		 *   @param {boolean} [options.fetchPendingAdmins=true]
+		 *   @param {boolean} [options.fetchAdminCount=true]
+		 *   @param {boolean} [options.fetchCapabilities=false]
+		 *   @param {boolean} [options.fetchAdminProfile=false]
+		 *   @param {boolean} [options.includeAdminSettings=false]
+		 *   @param {boolean} [options.includeJarvisConfig=false]
+		 */
+		newsletterAdminMetadata: async (jid, options = {}) => {
+			const {
+				fetchPendingAdmins = true,
+				fetchAdminCount = true,
+				fetchCapabilities = false,
+				fetchAdminProfile = false,
+				includeAdminSettings = false,
+				includeJarvisConfig = false
+			} = options
+			return executeWMexQuery(
+				{
+					jid,
+					include_thread_metadata: false,
+					include_messages: false,
+					fetch_pending_admin_invites: fetchPendingAdmins,
+					fetch_admin_count: fetchAdminCount,
+					fetch_capabilities: fetchCapabilities,
+					fetch_admin_profile: fetchAdminProfile,
+					include_admin_settings: includeAdminSettings,
+					include_jarvis_config: includeJarvisConfig
+				},
+				Types_1.QueryIds.ADMIN_METADATA,
+				Types_1.XWAPaths.xwa2_newsletter_admin
+			)
+		},
+		/**
+		 * Update admin profile fields for a newsletter (e.g. contact info, links).
+		 *
+		 * @param {string} jid - Newsletter JID
+		 * @param {object} updates - Admin profile fields to update
+		 */
+		newsletterAdminProfileUpdate: async (jid, updates) => {
+			return executeWMexQuery(
+				{ newsletter_id: jid, updates },
+				Types_1.QueryIds.ADMIN_PROFILE_UPDATE,
+				Types_1.XWAPaths.xwa2_newsletter_admin_profile_update
+			)
+		},
+		/**
+		 * Browse the newsletter directory by category.
+		 *
+		 * @param {object} options
+		 *   @param {number} [options.limit=20]
+		 *   @param {string[]} [options.interests] - Category filters
+		 *   @param {string} [options.sortField='SUBSCRIBER_COUNT']
+		 *   @param {string} [options.sortOrder='DESC']
+		 */
+		newsletterDirectoryList: async (options = {}) => {
+			const { limit = 20, interests = null, sortField = 'SUBSCRIBER_COUNT', sortOrder = 'DESC' } = options
+			const variables = { limit, sort_field: sortField, sort_order: sortOrder }
+			if (interests?.length) variables.interests = interests
+			return executeWMexQuery(variables, Types_1.QueryIds.DIRECTORY_LIST, Types_1.XWAPaths.xwa2_newsletters_directory_list)
+		},
+		/**
+		 * Search the newsletter directory.
+		 *
+		 * @param {string} searchText - Search query string
+		 * @param {object} options
+		 *   @param {number} [options.limit=20]
+		 *   @param {string} [options.startCursor] - Pagination cursor
+		 *   @param {string[]} [options.categories] - Category filters
+		 */
+		newsletterDirectorySearch: async (searchText, options = {}) => {
+			const { limit = 20, startCursor = null, categories = null } = options
+			const variables = { search_text: searchText, limit }
+			if (startCursor) variables.start_cursor = startCursor
+			if (categories?.length) variables.categories = categories
+			return executeWMexQuery(
+				variables,
+				Types_1.QueryIds.DIRECTORY_SEARCH,
+				Types_1.XWAPaths.xwa2_newsletters_directory_search
+			)
+		},
+		/**
+		 * Fetch a preview of newsletters grouped by directory category.
+		 *
+		 * @param {number} [limit=5] - Newsletters per category
+		 */
+		newsletterDirectoryCategoryPreview: async (limit = 5) => {
+			return executeWMexQuery(
+				{ limit },
+				Types_1.QueryIds.DIRECTORY_CATEGORY_PREVIEW,
+				Types_1.XWAPaths.xwa2_newsletters_directory_category_preview
+			)
+		},
+		/**
+		 * Search for newsletters by text query.
+		 *
+		 * @param {string} query - Search string
+		 * @param {number} [limit=20]
+		 * @param {string} [startCursor] - Pagination cursor
+		 */
+		newsletterSearch: async (query, limit = 20, startCursor = null) => {
+			const variables = { query, limit }
+			if (startCursor) variables.start_cursor = startCursor
+			return executeWMexQuery(variables, Types_1.QueryIds.SEARCH, Types_1.XWAPaths.xwa2_newsletters_search)
+		},
+		/**
+		 * Fetch recommended newsletters.
+		 *
+		 * @param {number} [limit=10]
+		 * @param {number} [numFollowed] - Number of newsletters the user already follows (used for ranking)
+		 */
+		newsletterRecommended: async (limit = 10, numFollowed = null) => {
+			const variables = { limit }
+			if (numFollowed != null) variables.num_newsletters_followed = numFollowed
+			return executeWMexQuery(variables, Types_1.QueryIds.RECOMMENDED, Types_1.XWAPaths.xwa2_newsletters_recommended)
+		},
+		/**
+		 * Fetch newsletters similar to a given newsletter.
+		 *
+		 * @param {string} jid - Newsletter JID to find similar newsletters for
+		 * @param {number} [limit=10]
+		 */
+		newsletterSimilar: async (jid, limit = 10) => {
+			return executeWMexQuery(
+				{ newsletter_id: jid, limit },
+				Types_1.QueryIds.SIMILAR,
+				Types_1.XWAPaths.xwa2_newsletters_similar
+			)
+		},
+		/**
+		 * Fetch the list of newsletters the current user is following.
+		 *
+		 * @param {string} [startCursor] - Pagination cursor
+		 * @param {number} [limit=20]
+		 */
+		newsletterFollowingList: async (startCursor = null, limit = 20) => {
+			const variables = { limit }
+			if (startCursor) variables.start_cursor = startCursor
+			return executeWMexQuery(variables, Types_1.QueryIds.FOLLOWING_LIST, Types_1.XWAPaths.xwa2_newsletter_following)
+		},
+		/**
+		 * Fetch admin insights/analytics for a newsletter.
+		 *
+		 * @param {string} jid - Newsletter JID
+		 * @param {string} [period] - Time period e.g. 'LAST_7_DAYS', 'LAST_30_DAYS'
+		 */
+		newsletterInsights: async (jid, period = null) => {
+			const variables = { newsletter_id: jid }
+			if (period) variables.period = period
+			return executeWMexQuery(variables, Types_1.QueryIds.INSIGHTS, Types_1.XWAPaths.xwa2_newsletter_admin_insights)
+		},
+		/**
+		 * Fetch the list of users who voted in a newsletter poll.
+		 *
+		 * @param {string} jid - Newsletter JID
+		 * @param {string} serverId - Server-side message ID of the poll
+		 * @param {string} [option] - Poll option to filter voters by
+		 * @param {string} [startCursor] - Pagination cursor
+		 */
+		newsletterPollVoterList: async (jid, serverId, option = null, startCursor = null) => {
+			const variables = { id: jid, server_id: serverId }
+			if (option != null) variables.option = option
+			if (startCursor) variables.start_cursor = startCursor
+			return executeWMexQuery(
+				variables,
+				Types_1.QueryIds.POLL_VOTER_LIST,
+				Types_1.XWAPaths.xwa2_newsletters_poll_voter_list
+			)
+		},
+		/**
+		 * Fetch the list of users who reacted to a newsletter message.
+		 *
+		 * @param {string} jid - Newsletter JID
+		 * @param {string} serverId - Server-side message sort ID
+		 * @param {string} [startCursor] - Pagination cursor
+		 */
+		newsletterReactionSenders: async (jid, serverId, startCursor = null) => {
+			const variables = { id: jid, server_id: serverId }
+			if (startCursor) variables.start_cursor = startCursor
+			return executeWMexQuery(
+				variables,
+				Types_1.QueryIds.REACTION_SENDERS_LIST,
+				Types_1.XWAPaths.xwa2_newsletters_reaction_sender_list
+			)
+		},
+		/**
+		 * Block a user from a newsletter (admin action).
+		 *
+		 * @param {string} jid - Newsletter JID
+		 * @param {string} userJid - JID of the user to block
+		 */
+		newsletterBlockUser: async (jid, userJid) => {
+			return executeWMexQuery(
+				{ newsletter_id: jid, user_id: userJid },
+				Types_1.QueryIds.BLOCK_USER,
+				'xwa2_newsletter_block_user'
+			)
+		},
+		/**
+		 * Enable Wamo (paid subscription) for a newsletter.
+		 *
+		 * @param {string} jid - Newsletter JID
+		 */
+		newsletterEnableWamo: async jid => {
+			return executeWMexQuery({ newsletter_id: jid }, Types_1.QueryIds.WAMO_ENABLE_SUB, 'xwa2_newsletter_wamo_enable_sub')
+		},
+		/**
+		 * Disable Wamo (paid subscription) for a newsletter.
+		 *
+		 * @param {string} jid - Newsletter JID
+		 */
+		newsletterDisableWamo: async jid => {
+			return executeWMexQuery(
+				{ newsletter_id: jid },
+				Types_1.QueryIds.WAMO_DISABLE_SUB,
+				'xwa2_newsletter_wamo_disable_sub'
+			)
+		},
+		/**
+		 * Change the Wamo subscription tier or settings for a newsletter.
+		 *
+		 * @param {string} jid - Newsletter JID
+		 * @param {object} subConfig - Subscription configuration (tier, price, etc.)
+		 */
+		newsletterChangeWamo: async (jid, subConfig) => {
+			return executeWMexQuery(
+				{ newsletter_id: jid, ...subConfig },
+				Types_1.QueryIds.WAMO_CHANGE_SUB,
+				'xwa2_newsletter_wamo_change_sub'
+			)
+		},
+		/**
+		 * Fetch Wamo AFS age collection data.
+		 * @param {string} jid - Newsletter JID
+		 */
+		wamoAfsAgeCollection: async jid =>
+			executeWMexQuery({ newsletter_id: jid }, Types_1.QueryIds.WAMO_AFS_AGE_COLLECTION, Types_1.XWAPaths.xwa2_wamo_afs_age_collection),
+		/**
+		 * Fetch Wamo asset collection (images/assets for Wamo UI).
+		 * @param {string} jid - Newsletter JID
+		 */
+		wamoAssetCollection: async jid =>
+			executeWMexQuery({ newsletter_id: jid }, Types_1.QueryIds.WAMO_ASSET_COLLECTION, Types_1.XWAPaths.xwa2_wamo_asset_collection),
+		/**
+		 * Fetch a Wamo ad-hoc notice by ID.
+		 * @param {string} noticeId - Notice ID to fetch
+		 */
+		wamoFetchAdhocNotice: async noticeId =>
+			executeWMexQuery({ notice_id: noticeId }, Types_1.QueryIds.WAMO_FETCH_ADHOC_NOTICE, Types_1.XWAPaths.xwa2_wamo_fetch_adhoc_notice_by_id),
+		/**
+		 * Fetch the Wamo identity token for a newsletter.
+		 * @param {string} jid - Newsletter JID
+		 */
+		wamoFetchIdentityToken: async jid =>
+			executeWMexQuery({ newsletter_id: jid }, Types_1.QueryIds.WAMO_FETCH_IDENTITY_TOKEN, Types_1.XWAPaths.xwa2_wamo_fetch_identity_token),
+		/**
+		 * Get Wamo subscription compliance info.
+		 * @param {string} jid - Newsletter JID
+		 */
+		wamoSubComplianceInfo: async jid =>
+			executeWMexQuery({ newsletter_id: jid }, Types_1.QueryIds.WAMO_SUB_COMPLIANCE_INFO, Types_1.XWAPaths.xwa2_wamo_sub_get_compliance_info),
+		/**
+		 * Get the Wamo user ID version for a newsletter.
+		 * @param {string} jid - Newsletter JID
+		 */
+		wamoUserIdVersion: async jid =>
+			executeWMexQuery({ newsletter_id: jid }, Types_1.QueryIds.WAMO_USER_ID_VERSION, Types_1.XWAPaths.xwa2_wamo_user_id_version),
+		/**
+		 * Set the Wamo user ID version for a newsletter.
+		 * @param {string} jid - Newsletter JID
+		 * @param {number} version - Version to set
+		 */
+		wamoSetUserIdVersion: async (jid, version) =>
+			executeWMexQuery({ newsletter_id: jid, version }, Types_1.QueryIds.WAMO_SET_USER_ID_VERSION, Types_1.XWAPaths.xwa2_wamo_set_user_id_version),
+		/**
+		 * Leave a newsletter (unsubscribe).
+		 * @param {string} jid - Newsletter JID
+		 */
+		newsletterLeave: async jid =>
+			executeWMexQuery({ newsletter_id: jid }, Types_1.QueryIds.LEAVE, Types_1.XWAPaths.xwa2_newsletter_leave_v2),
+		/**
+		 * Create a verified newsletter.
+		 * @param {string} name - Newsletter name
+		 * @param {string} [description]
+		 */
+		newsletterCreateVerified: async (name, description = null) =>
+			executeWMexQuery(
+				{ input: { name, description } },
+				Types_1.QueryIds.CREATE_VERIFIED,
+				Types_1.XWAPaths.xwa2_newsletter_create_verified
+			),
+		/**
+		 * Fetch newsletter enforcements (ban/restriction info).
+		 * @param {string} jid - Newsletter JID
+		 */
+		newsletterEnforcements: async jid =>
+			executeWMexQuery({ newsletter_id: jid }, Types_1.QueryIds.ENFORCEMENTS, Types_1.XWAPaths.xwa2_newsletter_enforcements),
+		/**
+		 * Fetch user reports for a newsletter (admin action).
+		 * @param {string} jid - Newsletter JID
+		 * @param {string} [cursor] - Pagination cursor
+		 */
+		newsletterUserReports: async (jid, cursor = null) => {
+			const variables = { newsletter_id: jid }
+			if (cursor) variables.cursor = cursor
+			return executeWMexQuery(variables, Types_1.QueryIds.USER_REPORTS, Types_1.XWAPaths.xwa2_newsletter_user_reports)
+		},
+		/**
+		 * Create a report appeal for a newsletter.
+		 * @param {string} jid - Newsletter JID
+		 * @param {string} reason - Appeal reason text
+		 */
+		newsletterCreateReportAppeal: async (jid, reason) =>
+			executeWMexQuery(
+				{ newsletter_id: jid, reason },
+				Types_1.QueryIds.CREATE_REPORT_APPEAL,
+				Types_1.XWAPaths.xwa2_newsletter_create_report_appeal
+			),
+		/**
+		 * Check a newsletter link preview.
+		 * @param {string} url - URL to preview
+		 */
+		newsletterLinkPreviewCheck: async url =>
+			executeWMexQuery({ url }, Types_1.QueryIds.LINK_PREVIEW_CHECK, Types_1.XWAPaths.xwa2_newsletter_link_preview_check),
+		/**
+		 * Update newsletter verification status (admin/platform action).
+		 * @param {string} jid - Newsletter JID
+		 * @param {string} verification - Verification status
+		 */
+		newsletterUpdateVerification: async (jid, verification) =>
+			executeWMexQuery(
+				{ newsletter_id: jid, verification },
+				Types_1.QueryIds.UPDATE_VERIFICATION,
+				Types_1.XWAPaths.xwa2_newsletter_update_verification
+			),
+		/**
+		 * Label a newsletter post as paid partnership.
+		 * @param {string} jid - Newsletter JID
+		 * @param {string} serverId - Server message ID
+		 * @param {boolean} isPaidPartnership
+		 */
+		newsletterLabelPaidPartnership: async (jid, serverId, isPaidPartnership) =>
+			executeWMexQuery(
+				{ newsletter_id: jid, server_id: serverId, is_paid_partnership: isPaidPartnership },
+				Types_1.QueryIds.LABEL_PAID_PARTNERSHIP,
+				Types_1.XWAPaths.xwa2_newsletter_label_paid_partnership
+			),
+		/**
+		 * Log newsletter exposure events (analytics).
+		 * @param {{ newsletter_id: string, exposure_type: string }[]} events
+		 */
+		newsletterLogExposures: async events =>
+			executeWMexQuery({ events }, Types_1.QueryIds.LOG_EXPOSURES, Types_1.XWAPaths.xwa2_newsletter_log_exposures),
+		/**
+		 * Update user-specific newsletter setting (e.g. notification prefs).
+		 * @param {string} jid - Newsletter JID
+		 * @param {object} setting - Setting key/value
+		 */
+		newsletterUpdateUserSetting: async (jid, setting) =>
+			executeWMexQuery(
+				{ newsletter_id: jid, ...setting },
+				Types_1.QueryIds.UPDATE_USER_SETTING,
+				Types_1.XWAPaths.xwa2_newsletter_update_user_setting
+			),
+		/**
+		 * Fetch newsletter ranking features (ML signals).
+		 * @param {string} jid - Newsletter JID
+		 */
+		newsletterRankingFeatures: async jid =>
+			executeWMexQuery(
+				{ newsletter_id: jid },
+				Types_1.QueryIds.RANKING_FEATURES,
+				Types_1.XWAPaths.xwa2_newsletter_ranking_features
+			),
+		/**
+		 * Send view receipts for newsletter messages (marks them as seen).
+		 * serverMessageIds: array of numeric server-side message IDs.
+		 * Mirrors SendViewReceiptJob in the APK — builds a receipt stanza
+		 * with type="view" and a <list> of <item server_id="..."/> children.
+		 */
+		newsletterSendViewReceipt: async (jid, serverMessageIds) => {
+			const ids = Array.isArray(serverMessageIds) ? serverMessageIds : [serverMessageIds]
+			const receiptId = generateMessageTag()
+			await query({
+				tag: 'receipt',
+				attrs: {
+					to: jid,
+					id: receiptId,
+					type: 'view'
+				},
+				content: [
+					{
+						tag: 'list',
+						attrs: {},
+						content: ids.map(id => ({ tag: 'item', attrs: { server_id: String(id) } }))
+					}
+				]
+			})
 		}
 	}
 }

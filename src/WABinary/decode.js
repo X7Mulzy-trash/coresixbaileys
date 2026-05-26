@@ -217,11 +217,24 @@ const decodeDecompressedBinaryNode = (buffer, opts, indexRef = { index: 0 }) => 
 		const device = readInt(2)
 		const integrator = readInt(2)
 		let server = 'interop'
-		const beforeServer = indexRef.index
-		try {
-			server = readString(readByte())
-		} catch (err) {
-			indexRef.index = beforeServer
+		// Only attempt to read the optional server field if at least 1 byte remains
+		// and the next byte is a valid string tag (avoids corrupting the stream on
+		// unknown tags that readString would swallow silently after a catch).
+		if (indexRef.index < buffer.length) {
+			const serverTag = buffer[indexRef.index]
+			// BINARY_8 / BINARY_20 / BINARY_32 or a single-byte token (1–235) are
+			// valid string tags; LIST_EMPTY (0) means no server string follows.
+			const isValidStringTag =
+				(serverTag >= 1 && serverTag <= 235) ||
+				serverTag === TAGS.BINARY_8 ||
+				serverTag === TAGS.BINARY_20 ||
+				serverTag === TAGS.BINARY_32 ||
+				serverTag === TAGS.NIBBLE_8 ||
+				serverTag === TAGS.HEX_8
+			if (isValidStringTag) {
+				indexRef.index++ // consume the tag byte
+				server = readString(serverTag)
+			}
 		}
 		return `${integrator}-${user}:${device}@${server}`
 	}

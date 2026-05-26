@@ -449,6 +449,143 @@ const makeMessagesRecvSocket = config => {
 		}
 		await query(stanza)
 	}
+
+	const acceptCall = async (callId, callFrom) => {
+		const stanza = {
+			tag: 'call',
+			attrs: {
+				from: authState.creds.me.id,
+				to: callFrom
+			},
+			content: [
+				{
+					tag: 'accept',
+					attrs: {
+						'call-id': callId,
+						'call-creator': callFrom,
+						count: '0'
+					},
+					content: undefined
+				}
+			]
+		}
+		await query(stanza)
+	}
+
+	const terminateCall = async (callId, callFrom) => {
+		const stanza = {
+			tag: 'call',
+			attrs: {
+				from: authState.creds.me.id,
+				to: callFrom
+			},
+			content: [
+				{
+					tag: 'terminate',
+					attrs: {
+						'call-id': callId,
+						'call-creator': callFrom,
+						reason: 'user-terminated',
+						count: '0'
+					},
+					content: undefined
+				}
+			]
+		}
+		await query(stanza)
+	}
+
+	/**
+	 * Re-encrypt call key for a device that reconnected mid-call.
+	 * Source: OutgoingSignalingHandler.java enc_rekey / rekeyEncryptionTask
+	 *
+	 * @param {string} callId - Active call ID
+	 * @param {string} callFrom - JID of the call creator
+	 * @param {Buffer} encryptedKeyBytes - Re-encrypted call session key bytes
+	 * @param {number} [count=0] - Retry counter (0–4)
+	 */
+	const rekeyCall = async (callId, callFrom, encryptedKeyBytes, count = 0) => {
+		const stanza = {
+			tag: 'call',
+			attrs: {
+				from: authState.creds.me.id,
+				to: callFrom
+			},
+			content: [
+				{
+					tag: 'enc_rekey',
+					attrs: {
+						'call-id': callId,
+						'call-creator': callFrom,
+						count: count.toString()
+					},
+					content: [
+						{
+							tag: 'enc',
+							attrs: { v: '2', type: 'msg' },
+							content: encryptedKeyBytes
+						}
+					]
+				}
+			]
+		}
+		await query(stanza)
+	}
+
+	/**
+	 * Join a call via an invite link.
+	 * Source: OutgoingSignalingHandler.java link_join tag
+	 *
+	 * @param {string} callId - Call ID from the link
+	 * @param {string} callCreator - JID of the call creator
+	 * @param {string} linkToken - Token from the call link
+	 */
+	const joinCallLink = async (callId, callCreator, linkToken) => {
+		const stanza = {
+			tag: 'call',
+			attrs: {
+				from: authState.creds.me.id,
+				to: callCreator
+			},
+			content: [
+				{
+					tag: 'link_join',
+					attrs: {
+						'call-id': callId,
+						'call-creator': callCreator,
+						token: linkToken
+					},
+					content: undefined
+				}
+			]
+		}
+		await query(stanza)
+	}
+
+	/**
+	 * Query info about a call link before joining.
+	 * Source: OutgoingSignalingHandler.java link_query tag
+	 *
+	 * @param {string} callLinkCode - The call link code to query
+	 * @param {string} to - JID to send the query to
+	 */
+	const queryCallLink = async (callLinkCode, to) => {
+		const stanza = {
+			tag: 'call',
+			attrs: {
+				from: authState.creds.me.id,
+				to
+			},
+			content: [
+				{
+					tag: 'link_query',
+					attrs: { code: callLinkCode },
+					content: undefined
+				}
+			]
+		}
+		return query(stanza)
+	}
 	const sendRetryRequest = async (node, forceIncludeKeys = false) => {
 		const { fullMessage } = (0, Utils_1.decodeMessageNode)(node, authState.creds.me.id, authState.creds.me.lid || '')
 		const { key: msgKey } = fullMessage
@@ -900,6 +1037,71 @@ const makeMessagesRecvSocket = config => {
 		}
 	}
 
+	/**
+	 * Handle incoming interop notifications (type="interop").
+	 *
+	 * The APK emits these for:
+	 *  - stella_interop_enabled / stella_ios_enabled  → feature-flag toggles
+	 *  - ig_professional / ig_handle / followers       → Instagram profile data updates
+	 *  - fbid:thread / fbid:devices                   → Meta thread/device association
+	 *  - peer_device_presence                         → interop contact online/offline
+	 *  - group membership changes in interop groups   → add/remove/promote events
+	 */
+	const handleInteropNotification = (node, child) => {
+		const childTag = child?.tag
+		const attrs = child?.attrs || {}
+
+		// Feature flag: server toggled stella_interop_enabled or stella_ios_enabled
+		if (childTag === 'feature') {
+			const feature = attrs.name
+			const enabled = attrs.value === 'true' || attrs.value === '1'
+			logger.info({ feature, enabled }, '[interop] feature flag update')
+			ev.emit('interop.feature-update', { feature, enabled })
+			return
+		}
+
+		// Instagram profile data pushed for an interop contact
+		if (childTag === 'ig_profile') {
+			const contactUpdate = {
+				id: (0, WABinary_1.jidNormalizedUser)(node.attrs.from),
+				...(attrs.ig_handle ? { igHandle: attrs.ig_handle } : {}),
+				...(attrs.ig_professional !== undefined ? { igProfessional: attrs.ig_professional === 'true' } : {}),
+				...(attrs.followers !== undefined ? { igFollowers: parseInt(attrs.followers, 10) } : {})
+			}
+			logger.debug({ contactUpdate }, '[interop] ig_profile update')
+			ev.emit('contacts.update', [contactUpdate])
+			return
+		}
+
+		// peer_device_presence — interop contact came online or went offline
+		if (childTag === 'peer_device_presence') {
+			const jid = attrs.jid || (0, WABinary_1.jidNormalizedUser)(node.attrs.from)
+			const presence = attrs.type === 'unavailable' ? 'unavailable' : 'available'
+			logger.debug({ jid, presence }, '[interop] peer_device_presence')
+			ev.emit('presence.update', { id: jid, presences: { [jid]: { lastKnownPresence: presence } } })
+			return
+		}
+
+		// fbid:thread / fbid:devices — Meta thread or device list association
+		if (childTag === 'fbid_thread' || childTag === 'fbid_devices') {
+			logger.debug({ childTag, attrs, from: node.attrs.from }, '[interop] fbid association update')
+			ev.emit('interop.fbid-update', { type: childTag, jid: node.attrs.from, attrs })
+			return
+		}
+
+		// Interop group membership changes (add / remove / promote / demote)
+		if (childTag === 'participants') {
+			const groupJid = node.attrs.from
+			const action = attrs.type // 'add' | 'remove' | 'promote' | 'demote'
+			const participants = (0, WABinary_1.getBinaryNodeChildren)(child, 'participant').map(p => p.attrs.jid)
+			logger.info({ groupJid, action, participants }, '[interop] group participants update')
+			ev.emit('group-participants.update', { id: groupJid, participants, action })
+			return
+		}
+
+		logger.debug({ childTag, from: node.attrs.from }, '[interop] unhandled interop notification subtype')
+	}
+
 	const processNotification = async node => {
 		const result = {}
 		const [child] = (0, WABinary_1.getAllBinaryNodeChildren)(node)
@@ -1154,6 +1356,15 @@ const makeMessagesRecvSocket = config => {
 						ev.emit('contacts.update', updates)
 					}
 				}
+				break
+			case 'interop':
+				// Interop-related server notifications — covers:
+				//   stella_interop_enabled / stella_ios_enabled feature flags
+				//   ig_professional / ig_handle / followers (Instagram account data)
+				//   fbid:thread / fbid:devices (Meta thread/device references)
+				//   peer_device_presence updates
+				//   group membership changes in interop groups
+				handleInteropNotification(node, child)
 				break
 		}
 		if (Object.keys(result).length) {
@@ -2077,6 +2288,11 @@ const makeMessagesRecvSocket = config => {
 		sendRetryRequest,
 		offerCall,
 		rejectCall,
+		acceptCall,
+		terminateCall,
+		rekeyCall,
+		joinCallLink,
+		queryCallLink,
 		nodelogger,
 		setNodeLoggerListener,
 		fetchMessageHistory,
