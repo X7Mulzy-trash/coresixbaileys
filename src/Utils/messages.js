@@ -2649,29 +2649,6 @@ function getAggregateVotesInPollMessage({ message, pollUpdates }, meId) {
 	}
 	return Object.values(voteHashMap)
 }
-/**
- * Aggregates all event responses in an event message.
- * @param msg the event creation message
- * @param meId your jid
- * @returns A list of response types & their responders
- */
-function getAggregateResponsesInEventMessage({ eventResponses }, meId) {
-	const responseTypes = ['GOING', 'NOT_GOING', 'MAYBE']
-	const responseMap = {}
-	for (const type of responseTypes) {
-		responseMap[type] = {
-			response: type,
-			responders: []
-		}
-	}
-	for (const update of eventResponses || []) {
-		const responseType = update.eventResponse || 'UNKNOWN'
-		if (responseType !== 'UNKNOWN' && responseMap[responseType]) {
-			responseMap[responseType].responders.push((0, generics_1.getKeyAuthor)(update.eventResponseMessageKey, meId))
-		}
-	}
-	return Object.values(responseMap)
-}
 /** Given a list of message keys, aggregates them by chat & sender. Useful for sending read receipts in bulk */
 const aggregateMessageKeysNotFromMe = keys => {
 	const keyMap = {}
