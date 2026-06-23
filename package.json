@@ -1,7 +1,7 @@
 {
-  "name": "baron-baileys-v2",
+  "name": "coresixbaileys",
   "version": "1.5.6",
-  "description": "A high-performance WhatsApp Web library with Rust WASM acceleration",
+  "description": "A high-performance WhatsApp Web library",
   "keywords": [
     "whatsapp",
     "whatsapp-web",
@@ -13,12 +13,12 @@
     "automation",
     "md"
   ],
-  "homepage": "https://github.com/7ucg/baron-baileys-v2",
+  "homepage": "https://github.com/X7Mulzy-trash/coresixbaileys",
   "repository": {
-    "url": "git+https://github.com/7ucg/baron-baileys-v2.git"
+    "url": "git+https://github.com/X7Mulzy-trash/coresixbaileys.git"
   },
   "license": "MIT",
-  "author": "Baron",
+  "author": "X7Mulzy",
   "main": "src/index.js",
   "files": [
     "src/**/*",
@@ -34,7 +34,7 @@
     "preinstall": "node ./engine-requirements.js"
   },
   "dependencies": {
-    "whatsapp-rust-bridge": "github:7ucg/whatsapp-rust-bridge",
+    "whatsapp-rust-bridge": "github:X7Mulzy-trash/whatsapp-rust-bridge",
     "@adiwajshing/keyed-db": "^0.2.4",
     "@cacheable/node-cache": "^3.0.1",
     "@hapi/boom": "^10.0.1",
