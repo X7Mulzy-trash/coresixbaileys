@@ -1,4 +1,13 @@
 'use strict'
+const chalk = require("chalk");
+console.log(chalk.bold.gray("-----------------------------------------\n"));
+console.log(chalk.bold.cyan(`
+¤═―— ⎧ CORESIX BAILEYS ⎭ ⊱―—═¤
+Information: @coresix6
+Developer: @mulzyinfinity
+Status: Baileys success connected 
+`));
+console.log(chalk.bold.gray("-----------------------------------------\n"));
 var __createBinding =
 	(this && this.__createBinding) ||
 	(Object.create
